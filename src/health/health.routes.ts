@@ -9,18 +9,12 @@ import { fromDbDate, syncHealth, toDbDate } from './sync.service.js';
 export const healthRouter = Router();
 healthRouter.use(requireUser);
 
-/** Lo que va a llamar la app cuando lea HealthKit directo. */
 healthRouter.post('/sync', async (req, res) => {
   const payload = healthSyncPayload.parse(req.body);
   const result = await syncHealth(userId(res), 'HEALTHKIT', payload);
   res.json(result);
 });
 
-/**
- * Mientras tanto: el export.xml crudo en el body (Content-Type: application/xml).
- * Se parsea en streaming, se agrega por día y entra por el mismo servicio
- * que /sync. Un import nuevo reemplaza al anterior.
- */
 healthRouter.post('/import', async (req, res) => {
   req.setEncoding('utf8');
   const { payload, stats } = await parseAppleExport(req);
@@ -89,13 +83,17 @@ const dayPatchBody = z.object({
 
 healthRouter.patch('/days/:date', async (req, res) => {
   const date = z.iso.date().parse(req.params.date);
-  const data = dayPatchBody.parse(req.body);
+  const body = dayPatchBody.parse(req.body);
   const uid = userId(res);
+  const where = { userId_date: { userId: uid, date: toDbDate(date) } };
+
+  const actual = await prisma.dailyHealthSummary.findUnique({ where, select: { manualFields: true } });
+  const manualFields = Array.from(new Set([...(actual?.manualFields ?? []), ...Object.keys(body)]));
 
   const day = await prisma.dailyHealthSummary.upsert({
-    where: { userId_date: { userId: uid, date: toDbDate(date) } },
-    create: { userId: uid, date: toDbDate(date), ...data },
-    update: data,
+    where,
+    create: { userId: uid, date: toDbDate(date), ...body, manualFields },
+    update: { ...body, manualFields },
   });
 
   res.json({ ...day, date: fromDbDate(day.date) });

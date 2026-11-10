@@ -4,12 +4,6 @@ import { fromDbDate } from '../health/sync.service.js';
 import { prisma } from '../lib/prisma.js';
 import { runTool, toolDefinitions } from './tools.js';
 
-/**
- * OpenRouter expone la misma API que OpenAI, así que se usa el SDK oficial
- * apuntando a otra URL. La API key vive solo en el server. Se crea el cliente
- * recién al usarlo: el SDK tira error si la key falta, y sin key el resto de
- * la API igual tiene que levantar.
- */
 function openrouter() {
   const apiKey = process.env.OPENROUTER_API_KEY;
   if (!apiKey) throw new Error('Falta OPENROUTER_API_KEY en server/.env');
@@ -18,7 +12,6 @@ function openrouter() {
 
 const MODEL = process.env.OPENROUTER_MODEL ?? 'google/gemini-3.1-flash-lite';
 
-/** Cuántas idas y vueltas modelo ↔ tools se permiten por mensaje del usuario. */
 const MAX_STEPS = 6;
 
 export type ChatMessage = { role: 'user' | 'assistant'; content: string };
@@ -61,12 +54,6 @@ async function systemPrompt(userId: string): Promise<string> {
     .join('\n');
 }
 
-/**
- * Un turno de chat: manda el historial al modelo con las tools disponibles y,
- * mientras el modelo pida tools, las ejecuta y le devuelve el resultado.
- * Termina cuando el modelo responde con texto. Devuelve ese texto más la
- * lista de tools que usó (útil para mostrar y para debuggear).
- */
 export async function runChat(userId: string, history: ChatMessage[]) {
   const client = openrouter();
   const messages: ChatCompletionMessageParam[] = [

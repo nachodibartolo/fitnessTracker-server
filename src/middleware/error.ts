@@ -1,7 +1,7 @@
 import type { NextFunction, Request, Response } from 'express';
 import { ZodError } from 'zod';
 
-/** Manejo centralizado de errores: Zod → 400, el resto → 500 con mensaje. */
+/* Todos los errores caen aca, cuando se rechaza una promesa async, viene aca  */
 export function errorHandler(err: unknown, _req: Request, res: Response, _next: NextFunction) {
   if (err instanceof ZodError) {
     res.status(400).json({ error: 'Body inválido', issues: err.issues });

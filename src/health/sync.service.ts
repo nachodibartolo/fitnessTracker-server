@@ -2,7 +2,6 @@ import { prisma } from '../lib/prisma.js';
 import type { HealthImportChannel } from '../generated/prisma/enums.js';
 import type { HealthSyncPayload } from './sync.schema.js';
 
-/** Columna `date` (@db.Date): Prisma toma la parte UTC del Date. */
 export function toDbDate(isoDate: string): Date {
   return new Date(`${isoDate}T00:00:00.000Z`);
 }
@@ -17,15 +16,6 @@ async function inChunks<T>(items: T[], size: number, fn: (item: T) => Promise<un
   }
 }
 
-/**
- * Upsertea el payload de salud de un usuario y deja registro en HealthImport.
- *
- * - APPLE_HEALTH_XML: reemplaza. Se borran los imports anteriores de ese canal
- *   (cascade → sus HealthSample) antes de insertar los nuevos.
- * - HEALTHKIT: incremental, solo upsertea lo que vino.
- * Días y workouts siempre se upsertean por clave natural, así los ids
- * sobreviven a un re-import.
- */
 export async function syncHealth(
   userId: string,
   channel: HealthImportChannel,
@@ -41,9 +31,25 @@ export async function syncHealth(
       await prisma.healthImport.deleteMany({ where: { userId, channel, id: { not: imp.id } } });
     }
 
+    const conManuales = await prisma.dailyHealthSummary.findMany({
+      where: {
+        userId,
+        date: { in: payload.days.map((d) => toDbDate(d.date)) },
+        NOT: { manualFields: { isEmpty: true } },
+      },
+      select: { date: true, manualFields: true },
+    });
+    const manualesPorDia = new Map<string, string[]>();
+    for (const d of conManuales) {
+      manualesPorDia.set(fromDbDate(d.date), d.manualFields);
+    }
+
     await inChunks(payload.days, 20, (d) => {
       const { date, ...fields } = d;
       const data = { ...fields, importId: imp.id };
+      for (const campo of manualesPorDia.get(date) ?? []) {
+        data[campo as keyof typeof fields] = undefined;
+      }
       return prisma.dailyHealthSummary.upsert({
         where: { userId_date: { userId, date: toDbDate(date) } },
         create: { userId, date: toDbDate(date), ...data },

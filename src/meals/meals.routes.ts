@@ -6,16 +6,14 @@ import { requireUser, userId } from '../middleware/user.js';
 import { analyzeAndLogMeal } from './meal-agent.js';
 
 export const mealsRouter = Router();
-mealsRouter.use(requireUser);
+mealsRouter.use(requireUser); //Chequea contra la base el token del usuario, corre antes de todas las rutas.
 
 const mealInclude = { items: { orderBy: { order: 'asc' as const } } };
 
 const dayQuery = z.object({
-  /** Día calendario en la zona horaria del usuario. Default: hoy. */
   date: z.iso.date().optional(),
 });
 
-/** GET /api/meals?date=YYYY-MM-DD → { date, meals, totals } */
 mealsRouter.get('/', async (req, res) => {
   const uid = userId(res);
   const q = dayQuery.parse(req.query);
@@ -42,21 +40,20 @@ mealsRouter.get('/', async (req, res) => {
   res.json({ date, meals, totals });
 });
 
-const analyzeBody = z
+/* Molde que dice que forma tiene que tener el body de analyze*/
+const analyzeBody = z // 3 campos, string, string, timestampz todos opcionales. 
   .object({
     description: z.string().trim().max(1000).optional(),
-    /** Data URL con la foto (data:image/jpeg;base64,...). La app la manda ya reducida. */
     image: z
       .string()
       .regex(/^data:image\/(jpeg|png|webp|heic);base64,/, 'Tiene que ser un data URL de imagen')
       .optional(),
     eatenAt: z.iso.datetime().optional(),
   })
-  .refine((b) => b.description || b.image, { message: 'Mandá una descripción, una foto, o ambas' });
+  .refine((b) => b.description || b.image, { message: 'Mandá una descripción, una foto, o ambas' }); // Check sobre toda la fila, los 3 son opcionales, pero si o si tiene que haber 1
 
-/** POST /api/meals/analyze → la IA estima macros y guarda la comida. Devuelve la Meal creada. */
 mealsRouter.post('/analyze', async (req, res) => {
-  const body = analyzeBody.parse(req.body);
+  const body = analyzeBody.parse(req.body); // Hace el chequeo del body contra, AnalyzeBody, si falla tira ZodError 
   const meal = await analyzeAndLogMeal(userId(res), {
     description: body.description || undefined,
     image: body.image,
@@ -95,7 +92,6 @@ const recentQuery = z.object({
   limit: z.coerce.number().int().min(1).max(50).default(8),
 });
 
-/** GET /api/meals/recent?limit=8 → [{ date, meals }] anteriores a hoy, agrupadas por día */
 mealsRouter.get('/recent', async (req, res) => {
   const uid = userId(res);
   const q = recentQuery.parse(req.query);

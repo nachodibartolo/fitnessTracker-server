@@ -8,13 +8,13 @@ export async function requireUser(req: Request, res: Response, next: NextFunctio
       return;
    }
 
-   const session = await prisma.authSession.findUnique({ where: { token } });
+   const session = await prisma.authSession.findUnique({ where: { token } }); 
    if (!session || session.expiresAt < new Date()) {
       res.status(401).json({ error: 'Sesión inválida o vencida' });
       return;
    }
 
-   res.locals.userId = session.userId;
+   res.locals.userId = session.userId; //Guarda el user id para la request, se guarda solo para la request para soportar multiusuario
    next();
 }
 

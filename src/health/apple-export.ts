@@ -3,33 +3,8 @@ import { SaxesParser, type SaxesTagPlain } from 'saxes';
 import type { HealthMetric, WorkoutType } from '../generated/prisma/enums.js';
 import type { DayInput, HealthSyncPayload, SampleInput, WorkoutInput } from './sync.schema.js';
 
-/**
- * Parser en streaming del export.xml de Apple Health.
- *
- * Lee el archivo una sola vez, acumula por día y devuelve el mismo payload
- * que va a mandar la app cuando lea HealthKit directo. Lo crudo (FC minuto a
- * minuto, pasos por intervalo, segmentos de sueño) se descarta acá.
- *
- * Reglas:
- * - "Día" = fecha local del startDate. Apple exporta "2026-06-24 00:00:59 -0300"
- *   en hora local del dispositivo, así que son los primeros 10 caracteres.
- * - Métricas acumulativas (pasos, distancia, kcal, pisos): se suman por
- *   fuente y se toma la fuente con el total más alto del día, para no sumar
- *   dos veces lo que reportan reloj y teléfono a la vez.
- * - Sueño: cada segmento va al día en que uno se levanta, con corte a las
- *   18:00 sobre la hora de inicio (lo que empieza después de las 18 cuenta
- *   para el día siguiente; una siesta queda en su día). Es la convención de
- *   Apple. Los minutos por etapa suman todos los segmentos del día; la hora
- *   de acostarse/levantarse sale del bloque de sueño más largo (la noche),
- *   uniendo segmentos separados por menos de 90 minutos.
- * - Si hay <ActivitySummary>, sus kcal activas pisan a las calculadas.
- */
-
-// ---------------------------------------------------------------- fechas
-
 const localDate = (s: string) => s.slice(0, 10);
 const localHour = (s: string) => Number(s.slice(11, 13));
-/** "2026-06-24 00:00:59 -0300" → Date */
 const toDate = (s: string) => new Date(`${s.slice(0, 10)}T${s.slice(11, 19)}${s.slice(20, 23)}:${s.slice(23, 25)}`);
 const toMs = (s: string) => toDate(s).getTime();
 
@@ -39,10 +14,8 @@ function nextDay(isoDate: string): string {
   return d.toISOString().slice(0, 10);
 }
 
-/** Día al que pertenece un segmento de sueño: corte a las 18:00 sobre startDate. */
 const sleepDay = (start: string) => (localHour(start) >= 18 ? nextDay(localDate(start)) : localDate(start));
 
-/** Bloque más largo uniendo segmentos con huecos menores a `gapMs`. */
 function mainBlock(segs: { s: number; e: number }[], gapMs: number): { s: number; e: number } | null {
   if (segs.length === 0) return null;
   const sorted = [...segs].sort((a, b) => a.s - b.s);
@@ -59,8 +32,6 @@ function mainBlock(segs: { s: number; e: number }[], gapMs: number): { s: number
   return best;
 }
 
-// -------------------------------------------------------------- unidades
-
 type Conv = (v: number, unit: string) => number;
 const id: Conv = (v) => v;
 const toKg: Conv = (v, u) => (u === 'lb' ? v * 0.45359237 : u === 'g' ? v / 1000 : v);
@@ -74,8 +45,6 @@ const round = (v: number, decimals = 0) => {
   const f = 10 ** decimals;
   return Math.round(v * f) / f;
 };
-
-// --------------------------------------------------------- tablas de tipos
 
 type CumKey = 'steps' | 'distanceKm' | 'flightsClimbed' | 'activeEnergyKcal' | 'basalEnergyKcal';
 const CUMULATIVE: Record<string, { key: CumKey; conv: Conv }> = {
@@ -102,7 +71,6 @@ const LAST_OF_DAY: Record<string, { key: LastKey; conv: Conv }> = {
   HKQuantityTypeIdentifierLeanBodyMass: { key: 'leanBodyMassKg', conv: toKg },
 };
 
-/** Métricas puntuales que además suben como HealthSample. */
 const SAMPLES: Record<string, { metric: HealthMetric; conv: Conv }> = {
   HKQuantityTypeIdentifierBodyMass: { metric: 'BODY_MASS', conv: toKg },
   HKQuantityTypeIdentifierBodyFatPercentage: { metric: 'BODY_FAT_PERCENTAGE', conv: toFraction },
@@ -122,7 +90,7 @@ const SLEEP_STAGES: Record<string, Stage> = {
   HKCategoryValueSleepAnalysisAsleepDeep: 'deep',
   HKCategoryValueSleepAnalysisAsleepREM: 'rem',
   HKCategoryValueSleepAnalysisAsleepUnspecified: 'unspecified',
-  HKCategoryValueSleepAnalysisAsleep: 'unspecified', // exports viejos
+  HKCategoryValueSleepAnalysisAsleep: 'unspecified',
 };
 const ASLEEP: Stage[] = ['core', 'deep', 'rem', 'unspecified'];
 
@@ -136,8 +104,6 @@ const WORKOUT_TYPES: Record<string, WorkoutType> = {
   HKWorkoutActivityTypeSwimming: 'SWIMMING',
   HKWorkoutActivityTypeHighIntensityIntervalTraining: 'HIIT',
 };
-
-// ------------------------------------------------------------ acumuladores
 
 type Avg = { sum: number; n: number; min: number; max: number };
 const avgOf = (a?: Avg) => (a && a.n ? a.sum / a.n : null);
@@ -190,7 +156,6 @@ export async function parseAppleExport(
   const workouts: PendingWorkout[] = [];
   let current: PendingWorkout | null = null;
 
-  // FC cruda, solo en memoria, para calcular FC promedio/máx por workout.
   const hrTimes: number[] = [];
   const hrValues: number[] = [];
 
@@ -214,7 +179,6 @@ export async function parseAppleExport(
         const startMs = toMs(start);
         const endMs = toMs(end);
         s.min[stage] += (endMs - startMs) / 60000;
-        // Para ubicar la noche: dormido + despierto (no InBed, que abarca todo).
         if (stage !== 'inBed') s.segs.push({ s: startMs, e: endMs });
       }
       stats.recordsUsed++;
@@ -324,8 +288,6 @@ export async function parseAppleExport(
     };
   }
 
-  // --------------------------------------------------------------- parseo
-
   const workoutLocalStart: string[] = [];
   const parser = new SaxesParser();
   const failure: { error: Error | null } = { error: null };
@@ -366,8 +328,6 @@ export async function parseAppleExport(
   parser.close();
   if (failure.error) throw new Error(`XML inválido: ${failure.error.message}`);
 
-  // ------------------------------------------ FC por workout (post-parseo)
-
   const order = new Uint32Array(hrTimes.length);
   for (let i = 0; i < order.length; i++) order[i] = i;
   order.sort((x, y) => hrTimes[x]! - hrTimes[y]!);
@@ -406,8 +366,6 @@ export async function parseAppleExport(
       w.maxHeartRate = Math.round(max);
     }
   });
-
-  // ------------------------------------------------------- armar los días
 
   const maxSource = (m?: Map<string, number>) => (m && m.size ? Math.max(...m.values()) : null);
   const dayInputs: DayInput[] = [];

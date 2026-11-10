@@ -1,12 +1,7 @@
 import { z } from 'zod';
 import { HealthMetric, WorkoutType } from '../generated/prisma/enums.js';
 
-/**
- * Contrato de ingesta de salud. Lo produce hoy el importer del export.xml
- * (en el servidor) y a futuro la app leyendo HealthKit. El backend no
- * distingue de dónde vino.
- */
-const isoDate = z.iso.date(); // "YYYY-MM-DD" en la timezone del usuario
+const isoDate = z.iso.date();
 const num = z.number().finite();
 const int = z.number().int();
 

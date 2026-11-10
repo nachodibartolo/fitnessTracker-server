@@ -5,19 +5,12 @@ import type { MealType } from '../generated/prisma/enums.js';
 import { prisma } from '../lib/prisma.js';
 import { todayInTz } from '../lib/dates.js';
 
-/**
- * Agente de comida: recibe una foto y/o una descripción, estima los macros y
- * registra la comida en la base llamando a la tool `log_meal`. La tool es la
- * única forma de persistir: el modelo no puede escribir nada que no pase por
- * el schema de Zod.
- */
 function openrouter() {
   const apiKey = process.env.OPENROUTER_API_KEY;
   if (!apiKey) throw new Error('Falta OPENROUTER_API_KEY en server/.env');
   return new OpenAI({ baseURL: 'https://openrouter.ai/api/v1', apiKey });
 }
 
-/** El modelo tiene que soportar imágenes + tools. Por defecto el mismo del chat. */
 const MODEL =
   process.env.OPENROUTER_VISION_MODEL ?? process.env.OPENROUTER_MODEL ?? 'google/gemini-3.1-flash-lite';
 
@@ -82,9 +75,7 @@ const SYSTEM = [
 
 export type MealInput = {
   description?: string;
-  /** Data URL (data:image/jpeg;base64,...) o URL pública. */
   image?: string;
-  /** Instante en que se comió; default ahora. */
   eatenAt?: Date;
 };
 

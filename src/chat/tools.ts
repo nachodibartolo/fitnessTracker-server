@@ -4,14 +4,6 @@ import type { HealthMetric } from '../generated/prisma/enums.js';
 import { fromDbDate, toDbDate } from '../health/sync.service.js';
 import { prisma } from '../lib/prisma.js';
 
-/**
- * Tools de solo lectura que el modelo puede pedir. Cada una es una consulta
- * escrita por nosotros y filtrada por el usuario autenticado: el modelo nunca
- * ve SQL ni la base. Los parámetros se declaran con Zod y de ahí sale el JSON
- * Schema que se le manda al modelo (una sola fuente de verdad).
- */
-
-/** String plano con regex (y no z.iso.date) para que el JSON Schema que ve el modelo sea simple. */
 const isoDate = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Formato YYYY-MM-DD');
 
 const dateRange = z.object({
@@ -27,7 +19,6 @@ function resolveRange(r: DateRange, defaultDays: number) {
   return { from, to: new Date(`${fromDbDate(to)}T23:59:59.999Z`) };
 }
 
-/** Saca nulls, ids internos y timestamps para que el JSON que ve el modelo sea chico. */
 function compact<T extends object>(row: T): Partial<T> {
   const drop = new Set(['id', 'userId', 'importId', 'createdAt', 'updatedAt', 'externalId']);
   const out: Record<string, unknown> = {};
@@ -152,13 +143,11 @@ export const tools = {
 
 export type ToolName = keyof typeof tools;
 
-/** Lo que se le manda al modelo en cada request (formato OpenAI function calling). */
 export const toolDefinitions: ChatCompletionTool[] = Object.entries(tools).map(([name, t]) => {
   const { $schema: _, ...parameters } = z.toJSONSchema(t.params);
   return { type: 'function', function: { name, description: t.description, parameters } };
 });
 
-/** Ejecuta una tool pedida por el modelo. Los errores vuelven como resultado para que el modelo pueda reaccionar. */
 export async function runTool(userId: string, name: string, rawArgs: string): Promise<unknown> {
   const t = tools[name as ToolName];
   if (!t) return { error: `Tool desconocida: ${name}` };
